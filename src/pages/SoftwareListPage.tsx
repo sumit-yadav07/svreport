@@ -72,7 +72,7 @@ export const SoftwareListPage: React.FC = () => {
       }
 
       const response = await fetch(
-        `http://localhost:3001/api/latest/fleet/software/titles?${params.toString()}`,
+        `/api/latest/fleet/software/titles?${params.toString()}`,
         {
           headers: { 
             'Authorization': `Bearer ${token}`,
@@ -98,7 +98,7 @@ export const SoftwareListPage: React.FC = () => {
 
   const fetchOpenSourceList = async () => {
     try {
-      const response = await fetch('http://localhost:3001/api/open-source');
+      const response = await fetch('/api/open-source');
       if (response.ok) {
         const data = await response.json();
         const osSet = new Set(data.map((item: any) => item.software_title_id));
@@ -115,7 +115,7 @@ export const SoftwareListPage: React.FC = () => {
     try {
       if (openSourceList.has(softwareId)) {
         // Remove from open source
-        const response = await fetch(`http://localhost:3001/api/open-source/${softwareId}`, {
+        const response = await fetch(`/api/open-source/${softwareId}`, {
           method: 'DELETE',
         });
         if (response.ok) {
@@ -127,7 +127,7 @@ export const SoftwareListPage: React.FC = () => {
         }
       } else {
         // Add to open source
-        const response = await fetch('http://localhost:3001/api/open-source', {
+        const response = await fetch('/api/open-source', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ software_title_id: softwareId, name }),
@@ -155,7 +155,7 @@ export const SoftwareListPage: React.FC = () => {
       }
 
       const response = await fetch(
-        `http://localhost:3001/api/latest/fleet/software/titles?${params.toString()}`,
+        `/api/latest/fleet/software/titles?${params.toString()}`,
         {
           headers: { 
             'Authorization': `Bearer ${token}`,

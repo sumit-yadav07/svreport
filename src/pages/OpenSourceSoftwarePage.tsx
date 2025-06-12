@@ -42,7 +42,7 @@ export const OpenSourceSoftwarePage: React.FC = () => {
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:3001/api/open-source');
+      const response = await fetch('/api/open-source');
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
@@ -55,7 +55,7 @@ export const OpenSourceSoftwarePage: React.FC = () => {
       for (const software of data) {
         try {
           const detailResponse = await fetch(
-            `http://localhost:3001/api/latest/fleet/software/titles/${software.software_title_id}`,
+            `/api/latest/fleet/software/titles/${software.software_title_id}`,
             { 
               headers: { 
                 'Authorization': `Bearer ${token}`,
@@ -84,7 +84,7 @@ export const OpenSourceSoftwarePage: React.FC = () => {
     if (!['admin', 'maintainer'].includes(user?.global_role || '')) return;
 
     try {
-      const response = await fetch(`http://localhost:3001/api/open-source/${softwareId}`, {
+      const response = await fetch(`/api/open-source/${softwareId}`, {
         method: 'DELETE',
       });
       if (response.ok) {

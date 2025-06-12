@@ -77,7 +77,7 @@ export const HostDetailsPage: React.FC = () => {
     setError(null);
     
     try {
-      const response = await fetch(`http://localhost:3001/api/latest/fleet/hosts/${id}?exclude_software=true`, {
+      const response = await fetch(`/api/latest/fleet/hosts/${id}?exclude_software=true`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -115,7 +115,7 @@ export const HostDetailsPage: React.FC = () => {
         params.append('per_page', paginationParams.per_page.toString());
       }
 
-      const response = await fetch(`http://localhost:3001/api/latest/fleet/hosts/${id}/software?${params.toString()}`, {
+      const response = await fetch(`/api/latest/fleet/hosts/${id}/software?${params.toString()}`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',

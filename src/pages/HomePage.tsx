@@ -77,7 +77,7 @@ export const HomePage: React.FC = () => {
       let countResponse;
       if (softwareTitleId) {
         countResponse = await fetch(
-          `http://localhost:3001/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
+          `/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -87,7 +87,7 @@ export const HomePage: React.FC = () => {
         );
       } else if (softwareVersionId) {
         countResponse = await fetch(
-          `http://localhost:3001/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
+          `/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -97,7 +97,7 @@ export const HomePage: React.FC = () => {
         );
       } else {
         countResponse = await fetch(
-          'http://localhost:3001/api/latest/fleet/host_summary',
+          '/api/latest/fleet/host_summary',
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -152,7 +152,7 @@ export const HomePage: React.FC = () => {
       let countResponse;
       if (softwareTitleId) {
         countResponse = await fetch(
-          `http://localhost:3001/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
+          `/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -162,7 +162,7 @@ export const HomePage: React.FC = () => {
         );
       } else if (softwareVersionId) {
         countResponse = await fetch(
-          `http://localhost:3001/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
+          `/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -183,7 +183,7 @@ export const HomePage: React.FC = () => {
 
       // Then get the paginated hosts
       const response = await fetch(
-        `http://localhost:3001/api/latest/fleet/hosts?${params.toString()}`,
+        `/api/latest/fleet/hosts?${params.toString()}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -216,7 +216,7 @@ export const HomePage: React.FC = () => {
       let response;
       if (softwareVersionId) {
         response = await fetch(
-          `http://localhost:3001/api/latest/fleet/software/versions/${softwareVersionId}`,
+          `/api/latest/fleet/software/versions/${softwareVersionId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -226,7 +226,7 @@ export const HomePage: React.FC = () => {
         );
       } else if (softwareTitleId) {
         response = await fetch(
-          `http://localhost:3001/api/latest/fleet/software/titles/${softwareTitleId}`,
+          `/api/latest/fleet/software/titles/${softwareTitleId}`,
           {
             headers: {
               'Authorization': `Bearer ${token}`,
@@ -285,7 +285,7 @@ export const HomePage: React.FC = () => {
       }
 
       const response = await fetch(
-        `http://localhost:3001/api/latest/fleet/hosts?${params.toString()}`,
+        `/api/latest/fleet/hosts?${params.toString()}`,
         {
           headers: {
             'Authorization': `Bearer ${token}`,

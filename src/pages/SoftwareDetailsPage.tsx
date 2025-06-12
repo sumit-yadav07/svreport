@@ -37,7 +37,7 @@ export const SoftwareDetailsPage: React.FC = () => {
     setError(null);
     
     try {
-      const response = await fetch(`http://localhost:3001/api/latest/fleet/software/titles/${id}`, {
+      const response = await fetch(`/api/latest/fleet/software/titles/${id}`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
