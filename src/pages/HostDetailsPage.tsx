@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Monitor, Package, Settings, Calendar, HardDrive, Cpu, MemoryStick, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Monitor, Package, Settings, Calendar, HardDrive, Cpu, MemoryStick, AlertCircle, Download } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 interface HostDetails {
@@ -19,11 +19,29 @@ interface HostDetails {
   gigs_disk_space_available: number;
 }
 
+interface InstalledVersion {
+  version: string;
+  last_opened_at: string | null;
+  vulnerabilities: string[];
+  installed_paths: string[];
+}
+
 interface Software {
   id: number;
   name: string;
-  version: string;
   source: string;
+  status: string | null;
+  installed_versions: InstalledVersion[];
+  software_package: any | null;
+  app_store_app: any | null;
+}
+
+interface PaginationParams {
+  page: number;
+  per_page: number;
+  order_key: string;
+  order_direction: 'asc' | 'desc';
+  vulnerable?: boolean;
 }
 
 export const HostDetailsPage: React.FC = () => {
@@ -32,6 +50,14 @@ export const HostDetailsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'details' | 'software' | 'properties'>('details');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [paginationParams, setPaginationParams] = useState<PaginationParams>({
+    page: 0,
+    per_page: 20,
+    order_key: 'name',
+    order_direction: 'asc',
+    vulnerable: false
+  });
   
   const { id } = useParams<{ id: string }>();
   const { token } = useAuth();
@@ -44,7 +70,7 @@ export const HostDetailsPage: React.FC = () => {
         fetchHostSoftware();
       }
     }
-  }, [id, activeTab]);
+  }, [id, activeTab, paginationParams]);
 
   const fetchHostDetails = async () => {
     setIsLoading(true);
@@ -72,9 +98,24 @@ export const HostDetailsPage: React.FC = () => {
     }
   };
 
-  const fetchHostSoftware = async () => {
+  const fetchHostSoftware = async (exportAll: boolean = false) => {
     try {
-      const response = await fetch(`http://localhost:3001/api/latest/fleet/hosts/${id}/software`, {
+      const params = new URLSearchParams();
+      
+      // Always include filters
+      params.append('order_key', paginationParams.order_key);
+      params.append('order_direction', paginationParams.order_direction);
+      if (paginationParams.vulnerable !== undefined) {
+        params.append('vulnerable', paginationParams.vulnerable.toString());
+      }
+
+      // Only include pagination params if not exporting
+      if (!exportAll) {
+        params.append('page', paginationParams.page.toString());
+        params.append('per_page', paginationParams.per_page.toString());
+      }
+
+      const response = await fetch(`http://localhost:3001/api/latest/fleet/hosts/${id}/software?${params.toString()}`, {
         headers: { 
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
@@ -84,10 +125,69 @@ export const HostDetailsPage: React.FC = () => {
       if (response.ok) {
         const data = await response.json();
         setSoftware(data.software || []);
+        setTotalCount(data.count || 0);
+
+        // If this is an export request, trigger the download
+        if (exportAll) {
+          // Convert data to CSV format
+          const headers = ['Name', 'Version', 'Source', 'Vulnerability Count'];
+          const csvRows = [headers];
+
+          data.software.forEach((item: Software) => {
+            const version = item.installed_versions?.[0]?.version || 'N/A';
+            const vulnerabilityCount = item.installed_versions?.[0]?.vulnerabilities?.length || 0;
+            csvRows.push([
+              item.name,
+              version,
+              item.source,
+              vulnerabilityCount.toString()
+            ]);
+          });
+
+          // Convert to CSV string
+          const csvContent = csvRows.map(row => row.map(cell => {
+            // Escape quotes and wrap in quotes if contains comma or newline
+            const escaped = cell.toString().replace(/"/g, '""');
+            return cell.toString().includes(',') || cell.toString().includes('\n') 
+              ? `"${escaped}"` 
+              : escaped;
+          }).join(',')).join('\n');
+
+          // Create and trigger download
+          const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+          const url = window.URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `host-${id}-software-export.csv`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }
       }
     } catch (error) {
       console.error('Error fetching host software:', error);
     }
+  };
+
+  const handleExport = () => {
+    fetchHostSoftware(true);
+  };
+
+  const handlePageChange = (newPage: number) => {
+    setPaginationParams(prev => ({ ...prev, page: newPage }));
+  };
+
+  const handleSort = (key: string) => {
+    setPaginationParams(prev => ({
+      ...prev,
+      order_key: key,
+      order_direction: prev.order_key === key && prev.order_direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const handleVulnerableFilter = (value: boolean) => {
+    setPaginationParams(prev => ({ ...prev, vulnerable: value, page: 0 }));
   };
 
   const formatUptime = (seconds: number) => {
@@ -252,14 +352,42 @@ export const HostDetailsPage: React.FC = () => {
 
         {activeTab === 'software' && (
           <div className="space-y-4">
-            <h3 className="text-lg font-medium text-gray-900">Installed Software</h3>
+            <div className="flex justify-between items-center">
+              <h3 className="text-lg font-medium text-gray-900">Installed Software</h3>
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <label className="text-sm text-gray-600">Vulnerable Only:</label>
+                  <input
+                    type="checkbox"
+                    checked={paginationParams.vulnerable}
+                    onChange={(e) => handleVulnerableFilter(e.target.checked)}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  onClick={handleExport}
+                  className="inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                >
+                  <Download className="h-4 w-4 mr-2" />
+                  Export All
+                </button>
+              </div>
+            </div>
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                    <th 
+                      className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
+                      onClick={() => handleSort('name')}
+                    >
+                      Name {paginationParams.order_key === 'name' && (
+                        <span>{paginationParams.order_direction === 'asc' ? '↑' : '↓'}</span>
+                      )}
+                    </th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerabilities</th>
                   </tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
@@ -268,11 +396,27 @@ export const HostDetailsPage: React.FC = () => {
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center">
                           <Package className="h-4 w-4 text-gray-400 mr-2" />
-                          <span className="text-sm font-medium text-gray-900">{item.name}</span>
+                          <button
+                            onClick={() => navigate(`/software/${item.id}`)}
+                            className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors duration-200"
+                          >
+                            {item.name}
+                          </button>
                         </div>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{item.version}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {item.installed_versions?.[0]?.version || 'N/A'}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{item.source}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {item.installed_versions?.[0]?.vulnerabilities?.length > 0 ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            {item.installed_versions[0].vulnerabilities.length}
+                          </span>
+                        ) : (
+                          <span className="text-gray-500">0</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -282,6 +426,35 @@ export const HostDetailsPage: React.FC = () => {
               <div className="text-center py-8">
                 <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                 <p className="text-gray-500">No software information available</p>
+              </div>
+            )}
+            {software.length > 0 && (
+              <div className="flex items-center justify-between px-4 py-3 bg-white border-t border-gray-200 sm:px-6">
+                <div className="flex items-center">
+                  <p className="text-sm text-gray-700">
+                    Showing <span className="font-medium">{paginationParams.page * paginationParams.per_page + 1}</span> to{' '}
+                    <span className="font-medium">
+                      {Math.min((paginationParams.page + 1) * paginationParams.per_page, totalCount)}
+                    </span>{' '}
+                    of <span className="font-medium">{totalCount}</span> results
+                  </p>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handlePageChange(paginationParams.page - 1)}
+                    disabled={paginationParams.page === 0}
+                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Previous
+                  </button>
+                  <button
+                    onClick={() => handlePageChange(paginationParams.page + 1)}
+                    disabled={(paginationParams.page + 1) * paginationParams.per_page >= totalCount}
+                    className="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Next
+                  </button>
+                </div>
               </div>
             )}
           </div>

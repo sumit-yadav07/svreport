@@ -4,7 +4,6 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { initializeDatabase } from './database.js';
-import { authRoutes } from './routes/auth.js';
 import { openSourceRoutes } from './routes/openSource.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -21,16 +20,11 @@ app.use(cors({
   origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 }));
+
 app.use(express.json());
 
-// API Routes (local) - these must come before the proxy
-app.use('/api', authRoutes);
+// API Routes (local)
 app.use('/api', openSourceRoutes);
-
-// Health check
-app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
 
 // Proxy middleware for external API
 const proxyOptions = {
@@ -49,17 +43,19 @@ const proxyOptions = {
     proxyReq.setHeader('Accept', 'application/json');
     proxyReq.setHeader('Content-Type', 'application/json');
     
-    console.log(`Proxying ${req.method} ${req.url} to ${proxyOptions.target}${req.url}`);
+    // If there's a body, write it to the proxy request
+    if (req.body) {
+      const bodyData = JSON.stringify(req.body);
+      proxyReq.setHeader('Content-Length', Buffer.byteLength(bodyData));
+      proxyReq.write(bodyData);
+    }
   },
   onProxyRes: (proxyRes, req, res) => {
     // Add CORS headers to proxied responses
     proxyRes.headers['Access-Control-Allow-Origin'] = req.headers.origin || '*';
     proxyRes.headers['Access-Control-Allow-Credentials'] = 'true';
-    
-    console.log(`Proxy response: ${proxyRes.statusCode} for ${req.url}`);
   },
   onError: (err, req, res) => {
-    console.error('Proxy error:', err.message);
     if (!res.headersSent) {
       res.status(500).json({ 
         error: 'Proxy error occurred', 
@@ -70,28 +66,39 @@ const proxyOptions = {
   }
 };
 
-// Apply proxy to all /api/latest routes
-app.use('/api/latest', createProxyMiddleware(proxyOptions));
+// Apply proxy to all /api routes
+app.use('/api', createProxyMiddleware(proxyOptions));
 
-// Serve static files from dist directory in production
-const distPath = path.join(__dirname, '../dist');
-app.use(express.static(distPath));
+// Development mode - proxy to Vite dev server
+if (process.env.NODE_ENV !== 'production') {
+  console.log('🔧 Development mode: Proxying to Vite dev server');
+  app.use('/', createProxyMiddleware({
+    target: 'http://localhost:5173',
+    changeOrigin: true,
+    ws: true, // Enable WebSocket for HMR
+  }));
+} else {
+  // Production mode - serve static files
+  console.log('🚀 Production mode: Serving static files from dist');
+  const distPath = path.join(__dirname, '../dist');
+  app.use(express.static(distPath));
 
-// Handle React Router - send all non-API requests to index.html
-app.get('*', (req, res) => {
-  // Don't serve index.html for API routes
-  if (req.path.startsWith('/api/')) {
-    return res.status(404).json({ error: 'API route not found', path: req.path });
-  }
-  
-  // For all other routes, serve the React app
-  res.sendFile(path.join(distPath, 'index.html'), (err) => {
-    if (err) {
-      console.error('Error serving index.html:', err);
-      res.status(500).json({ error: 'Failed to serve application' });
+  // Handle React Router - send all non-API requests to index.html
+  app.get('*', (req, res) => {
+    // Don't serve index.html for API routes
+    if (req.path.startsWith('/api/')) {
+      return res.status(404).json({ error: 'API route not found', path: req.path });
     }
+    
+    // For all other routes, serve the React app
+    res.sendFile(path.join(distPath, 'index.html'), (err) => {
+      if (err) {
+        console.error('Error serving index.html:', err);
+        res.status(500).json({ error: 'Failed to serve application' });
+      }
+    });
   });
-});
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -103,7 +110,5 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`Backend server running on http://localhost:${PORT}`);
-  console.log(`Health check available at http://localhost:${PORT}/api/health`);
-  console.log(`Frontend served from: ${distPath}`);
+  console.log(`Server is running on port ${PORT}`);
 });

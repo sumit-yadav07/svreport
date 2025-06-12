@@ -107,7 +107,7 @@ export const SoftwareDetailsPage: React.FC = () => {
       {/* Header */}
       <div className="flex items-center space-x-4">
         <button
-          onClick={() => navigate('/software')}
+          onClick={() => navigate(-1)}
           className="p-2 hover:bg-gray-100 rounded-lg transition-colors duration-200"
         >
           <ArrowLeft className="h-5 w-5 text-gray-600" />
@@ -154,7 +154,6 @@ export const SoftwareDetailsPage: React.FC = () => {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Hosts Count</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerabilities</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
               </tr>
             </thead>
@@ -162,32 +161,25 @@ export const SoftwareDetailsPage: React.FC = () => {
               {software.versions?.map((version) => (
                 <tr key={version.id} className="hover:bg-gray-50 transition-colors duration-200">
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="text-sm font-medium text-gray-900">{version.version}</span>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => navigate(`/software/versions/${version.id}`)}
+                        className="text-sm font-medium text-blue-600 hover:text-blue-800 transition-colors duration-200"
+                      >
+                        {version.version}
+                      </button>
+                      {version.vulnerabilities && version.vulnerabilities.length > 0 && (
+                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          {version.vulnerabilities.length} {version.vulnerabilities.length === 1 ? 'vulnerability' : 'vulnerabilities'}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center text-sm text-gray-900">
                       <Users className="h-4 w-4 text-gray-400 mr-1" />
                       {version.hosts_count}
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {version.vulnerabilities && version.vulnerabilities.length > 0 ? (
-                      <div className="space-y-1">
-                        {version.vulnerabilities.map((vuln, index) => (
-                          <div key={index} className="flex items-center">
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                              <AlertTriangle className="h-3 w-3 mr-1" />
-                              {vuln.cve}
-                            </span>
-                            <span className="ml-2 text-xs text-gray-500">
-                              CVSS: {vuln.cvss_score}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-gray-500">None</span>
-                    )}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <button

@@ -74,15 +74,15 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
       const data = await response.json();
       
-      if (!data.user || !data.token) {
+      if (!data.token) {
         throw new Error('Invalid response format');
       }
       
-      setUser(data.user);
       setToken(data.token);
+      setUser({ id: 0, name: email, email, global_role: 'admin' });
       
       localStorage.setItem('auth_token', data.token);
-      localStorage.setItem('auth_user', JSON.stringify(data.user));
+      localStorage.setItem('auth_user', JSON.stringify({ id: 0, name: email, email, global_role: 'admin' }));
     } catch (error) {
       console.error('Login error:', error);
       throw error;

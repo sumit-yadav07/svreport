@@ -41,7 +41,9 @@ export const LoginPage: React.FC = () => {
           </div>
           <h2 className="mt-6 text-3xl font-bold text-gray-900">Sign in to SVReport</h2>
           <p className="mt-2 text-sm text-gray-600">
-            Monitor and manage your fleet infrastructure
+            Powered by it.intern5
+            <br />
+            Use your FleetDM credentials to sign in*         
           </p>
         </div>
         
@@ -107,10 +109,6 @@ export const LoginPage: React.FC = () => {
               )}
             </button>
           </form>
-        </div>
-        
-        <div className="text-center text-xs text-gray-500">
-          Demo credentials: janedoe@example.com / VArCjNW7CfsxGp67
         </div>
       </div>
     </div>

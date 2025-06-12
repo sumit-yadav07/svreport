@@ -15,7 +15,12 @@ interface SoftwareTitle {
   name: string;
   hosts_count?: number;
   versions_count?: number;
-  vulnerabilities?: Array<{ cve: string; cvss_score: number }>;
+  versions?: Array<{
+    id: number;
+    version: string;
+    vulnerabilities: string[] | null;
+    hosts_count: number;
+  }>;
 }
 
 export const OpenSourceSoftwarePage: React.FC = () => {
@@ -102,11 +107,15 @@ export const OpenSourceSoftwarePage: React.FC = () => {
   const handleExport = () => {
     const exportData = filteredSoftware.map(software => {
       const details = softwareDetails.get(software.software_title_id);
+      const totalVulnerabilities = details?.versions?.reduce((count, version) => {
+        return count + (version.vulnerabilities?.length || 0);
+      }, 0) || 0;
+      
       return {
         Name: software.name,
         'Host Count': details?.hosts_count || 0,
         'Version Count': details?.versions_count || 0,
-        'Vulnerabilities Count': details?.vulnerabilities?.length || 0,
+        'Vulnerabilities Count': totalVulnerabilities,
         'Open Source': 'Yes'
       };
     });
@@ -215,14 +224,20 @@ export const OpenSourceSoftwarePage: React.FC = () => {
                       {details?.versions_count || 0}
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
-                      {details?.vulnerabilities && details.vulnerabilities.length > 0 ? (
-                        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                          <AlertTriangle className="h-3 w-3 mr-1" />
-                          {details.vulnerabilities.length}
-                        </span>
-                      ) : (
-                        <span className="text-sm text-gray-500">None</span>
-                      )}
+                      {(() => {
+                        const totalVulnerabilities = details?.versions?.reduce((count, version) => {
+                          return count + (version.vulnerabilities?.length || 0);
+                        }, 0) || 0;
+                        
+                        return totalVulnerabilities > 0 ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                            <AlertTriangle className="h-3 w-3 mr-1" />
+                            {totalVulnerabilities}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-gray-500">None</span>
+                        );
+                      })()}
                     </td>
                     {canManageOpenSource && (
                       <td className="px-6 py-4 whitespace-nowrap">

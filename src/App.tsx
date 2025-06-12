@@ -9,6 +9,7 @@ import { HostDetailsPage } from './pages/HostDetailsPage';
 import { SoftwareListPage } from './pages/SoftwareListPage';
 import { SoftwareDetailsPage } from './pages/SoftwareDetailsPage';
 import { OpenSourceSoftwarePage } from './pages/OpenSourceSoftwarePage';
+import { VersionDetailsPage } from './pages/VersionDetailsPage';
 
 function App() {
   return (
@@ -16,18 +17,19 @@ function App() {
       <Router>
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Navigate to="/home\" replace />} />
+          <Route path="/" element={<Navigate to="/home" replace />} />
           <Route
             path="/*"
             element={
               <ProtectedRoute>
                 <Layout>
                   <Routes>
-                    <Route path="/home\" element={<HomePage />} />
+                    <Route path="/home" element={<HomePage />} />
                     <Route path="/host/:id" element={<HostDetailsPage />} />
                     <Route path="/software" element={<SoftwareListPage />} />
                     <Route path="/software/open-source" element={<OpenSourceSoftwarePage />} />
                     <Route path="/software/:id" element={<SoftwareDetailsPage />} />
+                    <Route path="/software/versions/:id" element={<VersionDetailsPage />} />
                   </Routes>
                 </Layout>
               </ProtectedRoute>

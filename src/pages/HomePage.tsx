@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Search, Download, Monitor, CheckCircle, XCircle, HardDrive, Calendar, RotateCcw, AlertCircle } from 'lucide-react';
+import { Search, Download, Monitor, CheckCircle, XCircle, HardDrive, Calendar, RotateCcw, AlertCircle, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { exportToCSV } from '../utils/csvExport';
 
@@ -22,40 +22,261 @@ interface HostsResponse {
   count: number;
 }
 
+interface HostSummary {
+  totals_hosts_count: number;
+  online_count: number;
+  offline_count: number;
+  mia_count: number;
+  missing_30_days_count: number;
+  new_count: number;
+  all_linux_count: number;
+}
+
+interface SoftwareDetails {
+  id: number;
+  name: string;
+  version?: string;
+}
+
 export const HomePage: React.FC = () => {
-  const [hosts, setHosts] = useState<Host[]>([]);
+  const [allHosts, setAllHosts] = useState<Host[]>([]);
+  const [currentPage, setCurrentPage] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
   const [onlineCount, setOnlineCount] = useState(0);
+  const [offlineCount, setOfflineCount] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [softwareDetails, setSoftwareDetails] = useState<SoftwareDetails | null>(null);
   
   const { token } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const hostsPerPage = 50;
+
+  const softwareTitleId = searchParams.get('software_title_id');
+  const softwareVersionId = searchParams.get('software_version_id');
 
   useEffect(() => {
-    fetchHosts();
-  }, [searchParams]);
+    if (token) {
+      fetchHostSummary();
+      fetchAllHosts();
+      if (softwareTitleId || softwareVersionId) {
+        fetchSoftwareDetails();
+      } else {
+        setSoftwareDetails(null);
+      }
+    } else {
+      setError('Authentication required');
+      setIsLoading(false);
+    }
+  }, [token, softwareTitleId, softwareVersionId, currentPage]);
 
-  const fetchHosts = async () => {
+  const fetchHostSummary = async () => {
+    try {
+      let countResponse;
+      if (softwareTitleId) {
+        countResponse = await fetch(
+          `http://localhost:3001/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } else if (softwareVersionId) {
+        countResponse = await fetch(
+          `http://localhost:3001/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } else {
+        countResponse = await fetch(
+          'http://localhost:3001/api/latest/fleet/host_summary',
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      }
+      
+      if (!countResponse.ok) {
+        throw new Error(`HTTP ${countResponse.status}: ${countResponse.statusText}`);
+      }
+      
+      const data = await countResponse.json();
+      
+      if (softwareTitleId || softwareVersionId) {
+        setTotalCount(data.count || 0);
+        // For filtered views, we don't have online/offline counts
+        setOnlineCount(0);
+        setOfflineCount(0);
+      } else {
+        setTotalCount(data.totals_hosts_count);
+        setOnlineCount(data.online_count);
+        setOfflineCount(data.offline_count);
+      }
+    } catch (error) {
+      console.error('Error fetching host summary:', error);
+    }
+  };
+
+  const fetchAllHosts = async () => {
     setIsLoading(true);
     setError(null);
     
     try {
-      // Build URL with query parameters
       const params = new URLSearchParams({
-        page: '0',
-        per_page: '50',
+        page: currentPage.toString(),
+        per_page: hostsPerPage.toString(),
         device_mapping: 'true',
         order_key: 'display_name',
         order_direction: 'asc'
       });
 
-      // Add filters from URL params
-      const softwareTitleId = searchParams.get('software_title_id');
-      const softwareVersionId = searchParams.get('software_version_id');
+      if (softwareTitleId) {
+        params.append('software_title_id', softwareTitleId);
+      }
+      if (softwareVersionId) {
+        params.append('software_version_id', softwareVersionId);
+      }
+
+      // First get the total count
+      let countResponse;
+      if (softwareTitleId) {
+        countResponse = await fetch(
+          `http://localhost:3001/api/latest/fleet/hosts/count?software_title_id=${softwareTitleId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } else if (softwareVersionId) {
+        countResponse = await fetch(
+          `http://localhost:3001/api/latest/fleet/hosts/count?software_version_id=${softwareVersionId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      }
+
+      if (countResponse && !countResponse.ok) {
+        throw new Error(`HTTP ${countResponse.status}: ${countResponse.statusText}`);
+      }
+
+      if (countResponse) {
+        const countData = await countResponse.json();
+        setTotalCount(countData.count || 0);
+      }
+
+      // Then get the paginated hosts
+      const response = await fetch(
+        `http://localhost:3001/api/latest/fleet/hosts?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
       
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
+      }
+      
+      const data: HostsResponse = await response.json();
+      
+      if (!data || !Array.isArray(data.hosts)) {
+        throw new Error('Invalid response format: hosts array is missing');
+      }
+
+      setAllHosts(data.hosts || []);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to fetch hosts');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchSoftwareDetails = async () => {
+    try {
+      let response;
+      if (softwareVersionId) {
+        response = await fetch(
+          `http://localhost:3001/api/latest/fleet/software/versions/${softwareVersionId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      } else if (softwareTitleId) {
+        response = await fetch(
+          `http://localhost:3001/api/latest/fleet/software/titles/${softwareTitleId}`,
+          {
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+      }
+
+      if (response && !response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      if (response) {
+        const data = await response.json();
+        if (softwareVersionId) {
+          setSoftwareDetails({
+            id: data.software_version.id,
+            name: data.software_version.name,
+            version: data.software_version.version
+          });
+        } else {
+          setSoftwareDetails({
+            id: data.software_title.id,
+            name: data.software_title.name
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Error fetching software details:', error);
+    }
+  };
+
+  // Filter hosts based on search term
+  const filteredHosts = allHosts.filter(host =>
+    host.display_name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+  };
+
+  const handleExport = async () => {
+    try {
+      const params = new URLSearchParams({
+        device_mapping: 'true',
+        order_key: 'display_name',
+        order_direction: 'asc'
+      });
+
       if (softwareTitleId) {
         params.append('software_title_id', softwareTitleId);
       }
@@ -78,35 +299,28 @@ export const HomePage: React.FC = () => {
       }
       
       const data: HostsResponse = await response.json();
-      setHosts(data.hosts || []);
-      setTotalCount(data.count || 0);
-      setOnlineCount(data.hosts?.filter(host => host.status === 'online').length || 0);
+      
+      if (!data || !Array.isArray(data.hosts)) {
+        throw new Error('Invalid response format: hosts array is missing');
+      }
+
+      const exportData = data.hosts.map(host => ({
+        Host: host.display_name,
+        Status: host.status,
+        Issues: host.issues?.total_issues_count || 0,
+        'Disk Space (GB)': host.gigs_disk_space_available || 0,
+        OS: host.os_version,
+        Osquery: host.osquery_version,
+        'Private IP': host.primary_ip,
+        'Last Fetched': host.detail_updated_at,
+        'Last Restarted': host.last_restarted_at
+      }));
+      
+      exportToCSV(exportData, 'hosts-report');
     } catch (error) {
-      console.error('Error fetching hosts:', error);
-      setError(error instanceof Error ? error.message : 'Failed to fetch hosts');
-    } finally {
-      setIsLoading(false);
+      console.error('Error exporting hosts:', error);
+      setError(error instanceof Error ? error.message : 'Failed to export hosts');
     }
-  };
-
-  const filteredHosts = hosts.filter(host =>
-    host.display_name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
-
-  const handleExport = () => {
-    const exportData = filteredHosts.map(host => ({
-      Host: host.display_name,
-      Status: host.status,
-      Issues: host.issues?.total_issues_count || 0,
-      'Disk Space (GB)': host.gigs_disk_space_available || 0,
-      OS: host.os_version,
-      Osquery: host.osquery_version,
-      'Private IP': host.primary_ip,
-      'Last Fetched': host.detail_updated_at,
-      'Last Restarted': host.last_restarted_at
-    }));
-    
-    exportToCSV(exportData, 'hosts-report');
   };
 
   const formatDate = (dateString: string) => {
@@ -135,7 +349,7 @@ export const HomePage: React.FC = () => {
           <h3 className="text-lg font-medium text-gray-900 mb-2">Error Loading Hosts</h3>
           <p className="text-gray-600 mb-4">{error}</p>
           <button
-            onClick={fetchHosts}
+            onClick={fetchAllHosts}
             className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors duration-200"
           >
             Retry
@@ -152,7 +366,7 @@ export const HomePage: React.FC = () => {
         <h1 className="text-3xl font-bold text-gray-900">Fleet Dashboard</h1>
         <button
           onClick={handleExport}
-          disabled={filteredHosts.length === 0}
+          disabled={allHosts.length === 0}
           className="flex items-center px-4 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
         >
           <Download className="h-4 w-4 mr-2" />
@@ -160,31 +374,71 @@ export const HomePage: React.FC = () => {
         </button>
       </div>
 
+      {/* Filter Indicator */}
+      {softwareDetails && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="text-sm font-medium text-gray-500">Filtered by:</span>
+              <span className="text-sm font-medium text-gray-900">
+                {softwareDetails.name}
+                {softwareDetails.version && ` (${softwareDetails.version})`}
+              </span>
+            </div>
+            <button
+              onClick={() => navigate('/home')}
+              className="flex items-center space-x-1 text-sm text-gray-500 hover:text-gray-700"
+            >
+              <X className="h-4 w-4" />
+              <span>Clear filter</span>
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
           <div className="flex items-center">
             <div className="p-2 bg-blue-100 rounded-lg">
               <Monitor className="h-6 w-6 text-blue-600" />
             </div>
             <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Total Hosts</p>
+              <p className="text-sm font-medium text-gray-600">
+                {softwareTitleId || softwareVersionId ? 'Filtered Hosts' : 'Total Hosts'}
+              </p>
               <p className="text-2xl font-bold text-gray-900">{totalCount}</p>
             </div>
           </div>
         </div>
 
-        <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
-          <div className="flex items-center">
-            <div className="p-2 bg-emerald-100 rounded-lg">
-              <CheckCircle className="h-6 w-6 text-emerald-600" />
+        {!softwareTitleId && !softwareVersionId && (
+          <>
+            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+              <div className="flex items-center">
+                <div className="p-2 bg-emerald-100 rounded-lg">
+                  <CheckCircle className="h-6 w-6 text-emerald-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Online Hosts</p>
+                  <p className="text-2xl font-bold text-gray-900">{onlineCount}</p>
+                </div>
+              </div>
             </div>
-            <div className="ml-4">
-              <p className="text-sm font-medium text-gray-600">Online Hosts</p>
-              <p className="text-2xl font-bold text-gray-900">{onlineCount}</p>
+
+            <div className="bg-white rounded-lg shadow-sm p-6 border border-gray-200">
+              <div className="flex items-center">
+                <div className="p-2 bg-red-100 rounded-lg">
+                  <XCircle className="h-6 w-6 text-red-600" />
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">Offline Hosts</p>
+                  <p className="text-2xl font-bold text-gray-900">{offlineCount}</p>
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
 
       {/* Search Bar */}
@@ -194,7 +448,10 @@ export const HomePage: React.FC = () => {
           type="text"
           placeholder="Search hosts by name..."
           value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
+          onChange={(e) => {
+            setSearchTerm(e.target.value);
+            setCurrentPage(0); // Reset to first page on search
+          }}
           className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
         />
       </div>
@@ -279,8 +536,37 @@ export const HomePage: React.FC = () => {
           <div className="text-center py-12">
             <Monitor className="h-12 w-12 text-gray-400 mx-auto mb-4" />
             <p className="text-gray-500">
-              {hosts.length === 0 ? 'No hosts found.' : 'No hosts found matching your search.'}
+              {allHosts.length === 0 ? 'No hosts found.' : 'No hosts found matching your search.'}
             </p>
+          </div>
+        )}
+
+        {/* Pagination */}
+        {totalCount > hostsPerPage && (
+          <div className="px-6 py-4 border-t border-gray-200">
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-700">
+                Showing <span className="font-medium">{currentPage * hostsPerPage + 1}</span> to{' '}
+                <span className="font-medium">{Math.min((currentPage + 1) * hostsPerPage, totalCount)}</span> of{' '}
+                <span className="font-medium">{totalCount}</span> results
+              </div>
+              <div className="flex space-x-2">
+                <button
+                  onClick={() => handlePageChange(currentPage - 1)}
+                  disabled={currentPage === 0}
+                  className="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Previous
+                </button>
+                <button
+                  onClick={() => handlePageChange(currentPage + 1)}
+                  disabled={(currentPage + 1) * hostsPerPage >= totalCount}
+                  className="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>
