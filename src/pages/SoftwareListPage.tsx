@@ -17,11 +17,16 @@ interface SoftwareTitle {
   versions_count: number;
   versions: SoftwareVersion[];
   source: string;
+  remark?: string;
 }
 
 interface SoftwareTitlesResponse {
   software_titles: SoftwareTitle[];
   count: number;
+}
+
+interface VendorInfo {
+  [softwareId: number]: string;
 }
 
 export const SoftwareListPage: React.FC = () => {
@@ -35,10 +40,69 @@ export const SoftwareListPage: React.FC = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [vendorInfo, setVendorInfo] = useState<VendorInfo>({});
+  const [remarks, setRemarks] = useState<{ [key: number]: string }>({});
+  const [showRemarkModal, setShowRemarkModal] = useState(false);
+  const [currentRemarkSoftwareId, setCurrentRemarkSoftwareId] = useState<number | null>(null);
+  const [currentRemarkText, setCurrentRemarkText] = useState<string>('');
   
   const { token, user } = useAuth();
   const navigate = useNavigate();
   const itemsPerPage = 20;
+
+  // Cache for vendor information
+  const vendorCache = new Map<number, string>();
+
+  const fetchVendorInfo = async (versionId: number, softwareId: number) => {
+    // Return cached value if available
+    if (vendorCache.has(softwareId)) {
+      return vendorCache.get(softwareId);
+    }
+
+    try {
+      const response = await fetch(
+        `/api/latest/fleet/software/${versionId}`,
+        {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      const vendor = data.software?.vendor || 'Unknown';
+      
+      // Update cache and state
+      vendorCache.set(softwareId, vendor);
+      setVendorInfo(prev => ({
+        ...prev,
+        [softwareId]: vendor
+      }));
+      
+      return vendor;
+    } catch (error) {
+      console.error('Error fetching vendor info:', error);
+      return 'Unknown';
+    }
+  };
+
+  // Effect to fetch vendor info when software titles change
+  useEffect(() => {
+    const fetchVendorsForCurrentPage = async () => {
+      const vendorPromises = softwareTitles
+        .filter(software => software.versions.length > 0 && !vendorInfo[software.id])
+        .map(software => fetchVendorInfo(software.versions[0].id, software.id));
+      
+      await Promise.all(vendorPromises);
+    };
+
+    fetchVendorsForCurrentPage();
+  }, [softwareTitles]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -88,6 +152,15 @@ export const SoftwareListPage: React.FC = () => {
       const data: SoftwareTitlesResponse = await response.json();
       setSoftwareTitles(data.software_titles || []);
       setTotalCount(data.count || 0);
+      // Initialize remarks from fetched data
+      const initialRemarks: { [key: number]: string } = {};
+      data.software_titles.forEach(software => {
+        if (software.remark) {
+          initialRemarks[software.id] = software.remark;
+        }
+      });
+      setRemarks(initialRemarks);
+
     } catch (error) {
       console.error('Error fetching software titles:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch software');
@@ -106,6 +179,56 @@ export const SoftwareListPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Error fetching open source list:', error);
+    }
+  };
+
+  const handleRemarkClick = (softwareId: number, currentRemark: string) => {
+    setCurrentRemarkSoftwareId(softwareId);
+    setCurrentRemarkText(currentRemark);
+    setShowRemarkModal(true);
+  };
+
+  const handleCloseRemarkModal = () => {
+    setShowRemarkModal(false);
+    setCurrentRemarkSoftwareId(null);
+    setCurrentRemarkText('');
+  };
+
+  const handleUpdateRemark = async () => {
+    if (currentRemarkSoftwareId === null) return;
+
+    try {
+      const response = await fetch(`/api/latest/fleet/software/titles/${currentRemarkSoftwareId}/remark`, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ remark: currentRemarkText }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      // Update the local state with the new remark
+      setRemarks(prev => ({
+        ...prev,
+        [currentRemarkSoftwareId]: currentRemarkText,
+      }));
+
+      // Also update the softwareTitles state to reflect the change immediately
+      setSoftwareTitles(prevTitles =>
+        prevTitles.map(software =>
+          software.id === currentRemarkSoftwareId
+            ? { ...software, remark: currentRemarkText }
+            : software
+        )
+      );
+      handleCloseRemarkModal();
+    } catch (error) {
+      console.error('Error updating remark:', error);
+      setError(error instanceof Error ? error.message : 'Failed to update remark');
     }
   };
 
@@ -179,16 +302,66 @@ export const SoftwareListPage: React.FC = () => {
   const handleExport = async () => {
     setIsExporting(true);
     try {
+      // First fetch all software titles based on current filters
       const allSoftware = await fetchAllSoftwareTitles();
+      
+      // Create a map to store vendor information
+      const vendorMap = new Map<number, string>();
+      
+      // Process software in batches of 20
+      const batchSize = 20;
+      const softwareWithVersions = allSoftware.filter(software => software.versions.length > 0);
+      
+      for (let i = 0; i < softwareWithVersions.length; i += batchSize) {
+        const batch = softwareWithVersions.slice(i, i + batchSize);
+        
+        // Fetch vendor information for current batch
+        const vendorPromises = batch.map(async (software) => {
+          try {
+            const versionId = software.versions[0].id;
+            const response = await fetch(
+              `/api/latest/fleet/software/${versionId}`,
+              {
+                headers: { 
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            vendorMap.set(software.id, data.software?.vendor || 'Unknown');
+          } catch (error) {
+            console.error(`Error fetching vendor info for software ${software.id}:`, error);
+            vendorMap.set(software.id, 'Unknown');
+          }
+        });
+        
+        // Wait for current batch to complete before moving to next batch
+        await Promise.all(vendorPromises);
+        
+        // Add a small delay between batches to prevent overwhelming the server
+        if (i + batchSize < softwareWithVersions.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      // Create export data with vendor information
       const exportData = allSoftware.map(software => ({
         Name: software.name,
         Type: software.source.charAt(0).toUpperCase() + software.source.slice(1),
+        Vendor: vendorMap.get(software.id) || 'Unknown',
         'Host Count': software.hosts_count,
         'Version Count': software.versions_count,
         'Vulnerabilities Count': software.versions.reduce((count, version) => {
           return count + (version.vulnerabilities?.length || 0);
         }, 0),
-        'Open Source': openSourceList.has(software.id) ? 'Yes' : 'No'
+        'Open Source': openSourceList.has(software.id) ? 'Yes' : 'No',
+        Remark: remarks[software.id] || '',
       }));
       
       exportToCSV(exportData, 'software-report');
@@ -285,12 +458,14 @@ export const SoftwareListPage: React.FC = () => {
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Host Count</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version Count</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerabilities</th>
                 {canToggleOpenSource && (
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Open Source</th>
                 )}
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Remarks</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
@@ -299,10 +474,12 @@ export const SoftwareListPage: React.FC = () => {
                   <td className="px-6 py-4 whitespace-nowrap">
                     <button
                       onClick={() => navigate(`/software/${software.id}`)}
-                      className="flex items-center text-left hover:text-blue-600 transition-colors duration-200"
+                      className="flex items-center text-left hover:text-blue-600 transition-colors duration-200 w-full"
                     >
-                      <Package className="h-4 w-4 text-gray-400 mr-2" />
-                      <span className="text-sm font-medium text-gray-900">{software.name}</span>
+                      <Package className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" />
+                      <div className="max-w-[200px] truncate" title={software.name}>
+                        <span className="text-sm font-medium text-gray-900">{software.name}</span>
+                      </div>
                     </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
@@ -315,6 +492,11 @@ export const SoftwareListPage: React.FC = () => {
                     }`}>
                       {software.source.charAt(0).toUpperCase() + software.source.slice(1)}
                     </span>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="max-w-[200px] truncate" title={vendorInfo[software.id] || 'Loading...'}>
+                      <span className="text-sm text-gray-900">{vendorInfo[software.id] || 'Loading...'}</span>
+                    </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center text-sm text-gray-900">
@@ -357,6 +539,11 @@ export const SoftwareListPage: React.FC = () => {
                       </button>
                     </td>
                   )}
+                  <td className="px-6 py-4 whitespace-nowrap">
+                    <div className="max-w-[200px] truncate" title={remarks[software.id] || 'Loading...'}>
+                      <span className="text-sm text-gray-900">{remarks[software.id] || 'Loading...'}</span>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>

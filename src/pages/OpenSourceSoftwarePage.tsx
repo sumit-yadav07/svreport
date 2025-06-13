@@ -23,9 +23,14 @@ interface SoftwareTitle {
   }>;
 }
 
+interface VendorInfo {
+  [softwareId: number]: string;
+}
+
 export const OpenSourceSoftwarePage: React.FC = () => {
   const [openSourceList, setOpenSourceList] = useState<OpenSourceSoftware[]>([]);
   const [softwareDetails, setSoftwareDetails] = useState<Map<number, SoftwareTitle>>(new Map());
+  const [vendorInfo, setVendorInfo] = useState<VendorInfo>({});
   const [searchTerm, setSearchTerm] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -33,9 +38,52 @@ export const OpenSourceSoftwarePage: React.FC = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    fetchOpenSourceList();
-  }, []);
+  // Cache for vendor information
+  const vendorCache = new Map<number, string>();
+
+  const fetchVendorInfo = async (versionId: number, softwareId: number) => {
+    // Return cached value if available
+    if (vendorCache.has(softwareId)) {
+      return vendorCache.get(softwareId);
+    }
+
+    // If we already have the vendor info in state, use that
+    if (vendorInfo[softwareId]) {
+      vendorCache.set(softwareId, vendorInfo[softwareId]);
+      return vendorInfo[softwareId];
+    }
+
+    try {
+      const response = await fetch(
+        `/api/latest/fleet/software/${versionId}`,
+        {
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+      
+      const data = await response.json();
+      const vendor = data.software?.vendor || 'Unknown';
+      
+      // Update cache and state
+      vendorCache.set(softwareId, vendor);
+      setVendorInfo(prev => ({
+        ...prev,
+        [softwareId]: vendor
+      }));
+      
+      return vendor;
+    } catch (error) {
+      console.error('Error fetching vendor info:', error);
+      return 'Unknown';
+    }
+  };
 
   const fetchOpenSourceList = async () => {
     setIsLoading(true);
@@ -52,7 +100,16 @@ export const OpenSourceSoftwarePage: React.FC = () => {
       
       // Fetch details for each software title
       const detailsMap = new Map();
+      const vendorPromises: Promise<void>[] = [];
+      const processedSoftwareIds = new Set<number>();
+
       for (const software of data) {
+        // Skip if we've already processed this software
+        if (processedSoftwareIds.has(software.software_title_id)) {
+          continue;
+        }
+        processedSoftwareIds.add(software.software_title_id);
+
         try {
           const detailResponse = await fetch(
             `/api/latest/fleet/software/titles/${software.software_title_id}`,
@@ -65,13 +122,35 @@ export const OpenSourceSoftwarePage: React.FC = () => {
           );
           if (detailResponse.ok) {
             const detailData = await detailResponse.json();
-            detailsMap.set(software.software_title_id, detailData.software_title);
+            const softwareTitle = detailData.software_title;
+            detailsMap.set(software.software_title_id, softwareTitle);
+
+            // If we have versions and haven't fetched vendor info yet, fetch it
+            if (softwareTitle.versions && 
+                softwareTitle.versions.length > 0 && 
+                !vendorCache.has(software.software_title_id) && 
+                !vendorInfo[software.software_title_id]) {
+              const versionId = softwareTitle.versions[0].id;
+              vendorPromises.push(
+                fetchVendorInfo(versionId, software.software_title_id)
+                  .then(vendor => {
+                    if (vendor) {
+                      setVendorInfo(prev => ({
+                        ...prev,
+                        [software.software_title_id]: vendor
+                      }));
+                    }
+                  })
+              );
+            }
           }
         } catch (error) {
           console.error(`Error fetching details for software ${software.software_title_id}:`, error);
         }
       }
+
       setSoftwareDetails(detailsMap);
+      await Promise.all(vendorPromises);
     } catch (error) {
       console.error('Error fetching open source list:', error);
       setError(error instanceof Error ? error.message : 'Failed to fetch open source software');
@@ -79,6 +158,10 @@ export const OpenSourceSoftwarePage: React.FC = () => {
       setIsLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchOpenSourceList();
+  }, []);
 
   const removeFromOpenSource = async (softwareId: number) => {
     if (!['admin', 'maintainer'].includes(user?.global_role || '')) return;
@@ -104,23 +187,83 @@ export const OpenSourceSoftwarePage: React.FC = () => {
     software.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleExport = () => {
-    const exportData = filteredSoftware.map(software => {
-      const details = softwareDetails.get(software.software_title_id);
-      const totalVulnerabilities = details?.versions?.reduce((count, version) => {
-        return count + (version.vulnerabilities?.length || 0);
-      }, 0) || 0;
+  const handleExport = async () => {
+    try {
+      // Create a map to store vendor information
+      const vendorMap = new Map<number, string>();
       
-      return {
-        Name: software.name,
-        'Host Count': details?.hosts_count || 0,
-        'Version Count': details?.versions_count || 0,
-        'Vulnerabilities Count': totalVulnerabilities,
-        'Open Source': 'Yes'
-      };
-    });
-    
-    exportToCSV(exportData, 'open-source-software-report');
+      // Filter software that has versions
+      const softwareWithVersions = filteredSoftware.filter(software => {
+        const details = softwareDetails.get(software.software_title_id);
+        return details?.versions && details.versions.length > 0;
+      });
+      
+      // Process software in batches of 20
+      const batchSize = 20;
+      
+      for (let i = 0; i < softwareWithVersions.length; i += batchSize) {
+        const batch = softwareWithVersions.slice(i, i + batchSize);
+        
+        // Fetch vendor information for current batch
+        const vendorPromises = batch.map(async (software) => {
+          try {
+            const details = softwareDetails.get(software.software_title_id);
+            if (!details?.versions?.length) return;
+
+            const versionId = details.versions[0].id;
+            const response = await fetch(
+              `/api/latest/fleet/software/${versionId}`,
+              {
+                headers: { 
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              }
+            );
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const data = await response.json();
+            vendorMap.set(software.software_title_id, data.software?.vendor || 'Unknown');
+          } catch (error) {
+            console.error(`Error fetching vendor info for software ${software.software_title_id}:`, error);
+            vendorMap.set(software.software_title_id, 'Unknown');
+          }
+        });
+        
+        // Wait for current batch to complete before moving to next batch
+        await Promise.all(vendorPromises);
+        
+        // Add a small delay between batches to prevent overwhelming the server
+        if (i + batchSize < softwareWithVersions.length) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+      }
+      
+      // Create export data with vendor information
+      const exportData = filteredSoftware.map(software => {
+        const details = softwareDetails.get(software.software_title_id);
+        const totalVulnerabilities = details?.versions?.reduce((count, version) => {
+          return count + (version.vulnerabilities?.length || 0);
+        }, 0) || 0;
+        
+        return {
+          Name: software.name,
+          Vendor: vendorMap.get(software.software_title_id) || 'Unknown',
+          'Host Count': details?.hosts_count || 0,
+          'Version Count': details?.versions_count || 0,
+          'Vulnerabilities Count': totalVulnerabilities,
+          'Open Source': 'Yes'
+        };
+      });
+      
+      exportToCSV(exportData, 'open-source-software-report');
+    } catch (error) {
+      console.error('Error exporting software data:', error);
+      // You might want to show an error message to the user here
+    }
   };
 
   const canManageOpenSource = ['admin', 'maintainer'].includes(user?.global_role || '');
@@ -189,6 +332,7 @@ export const OpenSourceSoftwarePage: React.FC = () => {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Host Count</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Version Count</th>
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vulnerabilities</th>
@@ -205,14 +349,21 @@ export const OpenSourceSoftwarePage: React.FC = () => {
                     <td className="px-6 py-4 whitespace-nowrap">
                       <button
                         onClick={() => navigate(`/software/${software.software_title_id}`)}
-                        className="flex items-center text-left hover:text-blue-600 transition-colors duration-200"
+                        className="flex items-center text-left hover:text-blue-600 transition-colors duration-200 w-full"
                       >
-                        <div className="flex items-center">
+                        <div className="flex items-center flex-shrink-0">
                           <Shield className="h-4 w-4 text-emerald-500 mr-2" />
                           <Package className="h-4 w-4 text-gray-400 mr-2" />
                         </div>
-                        <span className="text-sm font-medium text-gray-900">{software.name}</span>
+                        <div className="max-w-[200px] truncate" title={software.name}>
+                          <span className="text-sm font-medium text-gray-900">{software.name}</span>
+                        </div>
                       </button>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      <div className="max-w-[200px] truncate" title={vendorInfo[software.software_title_id] || 'Loading...'}>
+                        <span className="text-sm text-gray-900">{vendorInfo[software.software_title_id] || 'Loading...'}</span>
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center text-sm text-gray-900">
