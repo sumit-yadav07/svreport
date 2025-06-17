@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Download, Package, Shield, AlertTriangle, Users, AlertCircle, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Download, Package, Shield, AlertTriangle, Users, AlertCircle, ChevronLeft, ChevronRight, X, Edit3 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { exportToCSV } from '../utils/csvExport';
 
@@ -45,6 +45,7 @@ export const SoftwareListPage: React.FC = () => {
   const [showRemarkModal, setShowRemarkModal] = useState(false);
   const [currentRemarkSoftwareId, setCurrentRemarkSoftwareId] = useState<number | null>(null);
   const [currentRemarkText, setCurrentRemarkText] = useState<string>('');
+  const [isUpdatingRemark, setIsUpdatingRemark] = useState(false);
   
   const { token, user } = useAuth();
   const navigate = useNavigate();
@@ -91,6 +92,23 @@ export const SoftwareListPage: React.FC = () => {
     }
   };
 
+  // Fetch remarks from your local API
+  const fetchRemarks = async () => {
+    try {
+      const response = await fetch('/api/software-remarks');
+      if (response.ok) {
+        const data = await response.json();
+        const remarksMap: { [key: number]: string } = {};
+        data.forEach((item: any) => {
+          remarksMap[item.software_title_id] = item.remark;
+        });
+        setRemarks(remarksMap);
+      }
+    } catch (error) {
+      console.error('Error fetching remarks:', error);
+    }
+  };
+
   // Effect to fetch vendor info when software titles change
   useEffect(() => {
     const fetchVendorsForCurrentPage = async () => {
@@ -115,6 +133,7 @@ export const SoftwareListPage: React.FC = () => {
   useEffect(() => {
     fetchSoftwareTitles();
     fetchOpenSourceList();
+    fetchRemarks();
   }, [debouncedSearchTerm, currentPage, showVulnerable]);
 
   const fetchSoftwareTitles = async () => {
@@ -152,14 +171,6 @@ export const SoftwareListPage: React.FC = () => {
       const data: SoftwareTitlesResponse = await response.json();
       setSoftwareTitles(data.software_titles || []);
       setTotalCount(data.count || 0);
-      // Initialize remarks from fetched data
-      const initialRemarks: { [key: number]: string } = {};
-      data.software_titles.forEach(software => {
-        if (software.remark) {
-          initialRemarks[software.id] = software.remark;
-        }
-      });
-      setRemarks(initialRemarks);
 
     } catch (error) {
       console.error('Error fetching software titles:', error);
@@ -184,7 +195,7 @@ export const SoftwareListPage: React.FC = () => {
 
   const handleRemarkClick = (softwareId: number, currentRemark: string) => {
     setCurrentRemarkSoftwareId(softwareId);
-    setCurrentRemarkText(currentRemark);
+    setCurrentRemarkText(currentRemark || '');
     setShowRemarkModal(true);
   };
 
@@ -196,15 +207,18 @@ export const SoftwareListPage: React.FC = () => {
 
   const handleUpdateRemark = async () => {
     if (currentRemarkSoftwareId === null) return;
-
+    
+    setIsUpdatingRemark(true);
     try {
-      const response = await fetch(`/api/latest/fleet/software/titles/${currentRemarkSoftwareId}/remark`, {
-        method: 'PUT',
+      const response = await fetch('/api/software-remarks', {
+        method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ remark: currentRemarkText }),
+        body: JSON.stringify({ 
+          software_title_id: currentRemarkSoftwareId,
+          remark: currentRemarkText 
+        }),
       });
 
       if (!response.ok) {
@@ -217,18 +231,12 @@ export const SoftwareListPage: React.FC = () => {
         [currentRemarkSoftwareId]: currentRemarkText,
       }));
 
-      // Also update the softwareTitles state to reflect the change immediately
-      setSoftwareTitles(prevTitles =>
-        prevTitles.map(software =>
-          software.id === currentRemarkSoftwareId
-            ? { ...software, remark: currentRemarkText }
-            : software
-        )
-      );
       handleCloseRemarkModal();
     } catch (error) {
       console.error('Error updating remark:', error);
       setError(error instanceof Error ? error.message : 'Failed to update remark');
+    } finally {
+      setIsUpdatingRemark(false);
     }
   };
 
@@ -477,7 +485,7 @@ export const SoftwareListPage: React.FC = () => {
                       className="flex items-center text-left hover:text-blue-600 transition-colors duration-200 w-full"
                     >
                       <Package className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" />
-                      <div className="max-w-[200px] truncate" title={software.name}>
+                      <div className="max-w-[150px] truncate" title={software.name}>
                         <span className="text-sm font-medium text-gray-900">{software.name}</span>
                       </div>
                     </button>
@@ -494,7 +502,7 @@ export const SoftwareListPage: React.FC = () => {
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="max-w-[200px] truncate" title={vendorInfo[software.id] || 'Loading...'}>
+                    <div className="max-w-[120px] truncate" title={vendorInfo[software.id] || 'Loading...'}>
                       <span className="text-sm text-gray-900">{vendorInfo[software.id] || 'Loading...'}</span>
                     </div>
                   </td>
@@ -540,9 +548,18 @@ export const SoftwareListPage: React.FC = () => {
                     </td>
                   )}
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="max-w-[200px] truncate" title={remarks[software.id] || 'Loading...'}>
-                      <span className="text-sm text-gray-900">{remarks[software.id] || 'Loading...'}</span>
-                    </div>
+                    <button
+                      onClick={() => handleRemarkClick(software.id, remarks[software.id] || '')}
+                      className="flex items-center text-left hover:text-blue-600 transition-colors duration-200 w-full max-w-[150px]"
+                      title={remarks[software.id] || 'Click to add remark'}
+                    >
+                      <Edit3 className="h-3 w-3 text-gray-400 mr-1 flex-shrink-0" />
+                      <div className="truncate">
+                        <span className="text-sm text-gray-900">
+                          {remarks[software.id] || 'Add remark...'}
+                        </span>
+                      </div>
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -587,6 +604,51 @@ export const SoftwareListPage: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Remark Modal */}
+      {showRemarkModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-medium text-gray-900">Edit Remark</h3>
+              <button
+                onClick={handleCloseRemarkModal}
+                className="text-gray-400 hover:text-gray-600 transition-colors duration-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="mb-4">
+              <label htmlFor="remark" className="block text-sm font-medium text-gray-700 mb-2">
+                Remark
+              </label>
+              <textarea
+                id="remark"
+                rows={4}
+                value={currentRemarkText}
+                onChange={(e) => setCurrentRemarkText(e.target.value)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                placeholder="Enter your remark here..."
+              />
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={handleCloseRemarkModal}
+                className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200 transition-colors duration-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdateRemark}
+                disabled={isUpdatingRemark}
+                className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors duration-200"
+              >
+                {isUpdatingRemark ? 'Saving...' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

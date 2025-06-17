@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import { createProxyMiddleware } from 'http-proxy-middleware';
 import { initializeDatabase } from './database.js';
 import { openSourceRoutes } from './routes/openSource.js';
+import softwareRemarksRoutes from './routes/softwareRemarks.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,6 +28,7 @@ app.use(express.json());
 
 // API Routes (local)
 app.use('/api', openSourceRoutes);
+app.use('/api', softwareRemarksRoutes);
 
 // Proxy middleware for external API
 const proxyOptions = {

@@ -21,10 +21,26 @@ export const initializeDatabase = () => {
       )
     `);
 
-    // Create index for faster lookups
+    // Create software_remarks table
+    db.run(`
+      CREATE TABLE IF NOT EXISTS software_remarks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        software_title_id INTEGER UNIQUE NOT NULL,
+        remark TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    // Create indexes for faster lookups
     db.run(`
       CREATE INDEX IF NOT EXISTS idx_software_title_id 
       ON open_source_software(software_title_id)
+    `);
+
+    db.run(`
+      CREATE INDEX IF NOT EXISTS idx_remarks_software_title_id 
+      ON software_remarks(software_title_id)
     `);
   });
 };
