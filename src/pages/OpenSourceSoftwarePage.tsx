@@ -278,7 +278,8 @@ export const OpenSourceSoftwarePage: React.FC = () => {
           'Host Count': details?.hosts_count || 0,
           'Version Count': details?.versions_count || 0,
           'Vulnerabilities Count': totalVulnerabilities,
-          'Open Source': 'Yes'
+          'Open Source': 'Yes',
+          'Remarks': remarks[software.software_title_id] || ''
         };
       });
       
